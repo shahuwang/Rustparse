@@ -73,6 +73,7 @@ struct lexer<'a>{
     width: Pos,
     lastPos: Pos,
     parenDepth: u32,
+    errorlog: String, // 为了使用format！不得已增加这个字段,保证错误信息生命周期与lexer一致
     items: Vec<Item<'a>>,
 }
 
@@ -106,9 +107,9 @@ impl<'a> lexer<'a>{
         return Some(outchar[0]);
     }
     
-    fn errorf(&mut self, error: &'a str){
+    fn errorf(&'a mut self){
         // Rust 不支持 variadic parameters（E0045),所以只能由使用者先处理好错误信息了
-        let item = Item{typ: ItemType::ItemError, pos: self.start, val:error};
+        let item = Item{typ: ItemType::ItemError, pos: self.start, val:&self.errorlog};
         self.items.push(item);
     }
 
@@ -125,11 +126,22 @@ impl<'a> lexer<'a>{
     fn backup(&mut self){
         self.pos = self.pos - self.width; 
     }
+
+    fn at_terminator(&mut self)->bool{
+        let r = self.peek();
+        if r == None{return true};
+        match r{
+            Some(c) if is_space(c) || is_end_of_line(c)=>return true,
+            Some(c) if c == '.' || c==',' || c=='|' || c==':' || c==')' || c=='(' => return true,
+            Some(c) if self.rightDelim.starts_with(c) => return true,
+            _ => return false,
+        }
+    }
 }
 
 
 trait stateFn{
-    fn scan(&self, l: &mut lexer) -> Option<Box<stateFn>>;
+    fn scan<'a>(&self, l: &'a mut lexer<'a>) -> Option<Box<stateFn>>;
 }
 
 struct stateText;
@@ -182,19 +194,23 @@ impl stateFn for stateRightDelim{
 
 struct stateComment;
 impl stateFn for stateComment{
-    fn scan(&self, l:&mut lexer)->Option<Box<stateFn>>{
+    fn scan<'a>(&self, l:&'a mut lexer<'a>)->Option<Box<stateFn>>{
         // 不知道为什么Go要求模板注释必须紧贴着delim {{/* */ }} 这样多一个空格都是违法的 
         l.pos = l.pos + LEFTCOMMENT.len();
         let length = l.input.len();
         match l.input[l.pos..length].find(RIGHTCOMMENT){
             None => {
-                l.errorf("unclosed comment");
+                l.errorlog = String::from("unclosed comment");
+                l.errorf();
+                // l.errorf("unclosed comment");
                 return None;
             },
             Some(i) => {
                 l.pos = l.pos + i + RIGHTCOMMENT.len();
                 if !l.input[l.pos..length].starts_with(RIGHTDELIM){
-                    l.errorf("comment ends before closing delimiter");
+                    l.errorlog = String::from("comment ends before closing delimiter");
+                    l.errorf();
+                    // l.errorf("comment ends before closing delimiter");
                     return None;
                 }
                 l.pos = l.pos + RIGHTDELIM.len();
@@ -230,26 +246,32 @@ impl stateFn for stateSpace{
 struct stateInsideAction;
 impl stateFn for stateInsideAction{
     // InsideAction 类似于 {{ $x =1 }} 中间那部分的处理
-    fn scan(&self, l:&mut lexer)->Option<Box<stateFn>>{
+    fn scan<'a>(&self, l:&'a mut lexer<'a>)->Option<Box<stateFn>>{
         let length = l.input.len();
         if l.input[l.pos..length].starts_with(l.rightDelim){
             if l.parenDepth == 0{
                 return Some(Box::new(stateRightDelim));
             }
             // 括号未闭合
-            l.errorf("unclosed left paren");
+            l.errorlog = String::from("unclosed left paren");
+            l.errorf();
+            // l.errorf("unclosed left paren");
             return None;
         }
         let next =  l.next();
         if next == None{
-            l.errorf("unclosed action");
+            l.errorlog = String::from("unclosed action");
+            l.errorf();
+            // l.errorf("unclosed action");
             return None;
         }
         match next{
             Some(r) if is_space(r) => return Some(Box::new(stateSpace)),
             Some(r) if r == ':' => {
                 if l.next().unwrap() != '='{
-                    l.errorf("expected :=");
+                    l.errorlog = String::from("expected :=");
+                    l.errorf();
+                    // l.errorf("expected :=");
                     return None;
                 }
                 l.emit(ItemType::ItemColonEquals);
@@ -272,7 +294,7 @@ impl stateFn for stateInsideAction{
                 l.backup();
                 return Some(Box::new(stateNumber));
             },
-            Some(r) if is_alpha_numeric(r) =>{
+            Some(r) if is_alphanumeric(Some(r)) =>{
                 l.backup();
                 return Some(Box::new(stateIdentifier));
             },
@@ -284,7 +306,9 @@ impl stateFn for stateInsideAction{
                 l.emit(ItemType::ItemRightParen);
                 l.parenDepth = l.parenDepth - 1;
                 if l.parenDepth < 0{
-                    l.errorf("unexpected right paren )");
+                    l.errorlog = String::from("unexpected right paren )");
+                    l.errorf();
+                    // l.errorf("unexpected right paren )");
                     return None;
                 }
             },
@@ -294,8 +318,8 @@ impl stateFn for stateInsideAction{
                 return Some(Box::new(stateInsideAction));
             },
             Some(r) => {
-                let e = format!("unrecognized character in action: {}", r);
-                l.errorf(&e[..]);
+                l.errorlog = format!("unrecognized character in action: {}", r);
+                l.errorf();
                 return None;
             }
             _ => return None,
@@ -319,8 +343,12 @@ impl stateFn for stateRawQuote{
 }
 struct stateVariable;
 impl stateFn for stateVariable{
-    fn scan(&self, l:&mut lexer) -> Option<Box<stateFn>>{
-        None
+    fn scan<'a>(&self, l:&'a mut lexer<'a>) -> Option<Box<stateFn>>{
+        // if l.at_terminator(){
+        //     l.emit(ItemType::ItemVariable);
+        //     return Some(Box::new(stateInsideAction));
+        // }
+        return stateFieldOrValiable(l, ItemType::ItemVariable);
     }
 }
 struct stateChar;
@@ -331,10 +359,38 @@ impl stateFn for stateChar{
 }
 struct stateField;
 impl stateFn for stateField{
-    fn scan(&self, l:&mut lexer) -> Option<Box<stateFn>>{
-        None
+    // .x 这样的字段， . 已经扫描了
+    fn scan<'a>(&self, l:&'a mut lexer<'a>) -> Option<Box<stateFn>>{
+        stateFieldOrValiable(l, ItemType::ItemField) 
     }
 }
+
+fn stateFieldOrValiable<'a>(l: &'a mut lexer<'a>, typ: ItemType) -> Option<Box<stateFn>>{
+    if l.at_terminator(){
+        // 位于 "." 或者 "$" 之后的是终结符, 比如 .|pipe 这种，算作 ItemDot
+        if typ == ItemType::ItemVariable{
+            l.emit(ItemType::ItemVariable);
+        }else{
+            l.emit(ItemType::ItemDot);
+        }
+        return Some(Box::new(stateInsideAction));
+    }
+    loop{
+        let r = l.next();
+        if !is_alphanumeric(r){
+            l.backup();
+            if !l.at_terminator(){
+                l.errorlog = format!("bad character {}", r.unwrap());
+                l.errorf();
+                return None;
+            }
+            break;
+        }
+    }
+    l.emit(typ);
+    return Some(Box::new(stateInsideAction));
+}
+
 struct stateNumber;
 impl stateFn for stateNumber{
     fn scan(&self, l:&mut lexer) -> Option<Box<stateFn>>{
@@ -343,8 +399,36 @@ impl stateFn for stateNumber{
 }
 struct stateIdentifier;
 impl stateFn for stateIdentifier{
-    fn scan(&self, l:&mut lexer) -> Option<Box<stateFn>>{
-        None
+    // 主要用于识别几种类型：布尔值，关键字，以 . 开头的字段， 不以 . 开头的字段
+    // 两者分别如 .x 以及 x (可能是数字一类的)
+    fn scan<'a>(&self, l:&'a mut lexer<'a>) -> Option<Box<stateFn>>{
+        loop{
+            let next = l.next();
+            if !is_alphanumeric(next){
+                // 一般情况下是遇到空格或者. 号才执行如下代码
+                l.backup();
+                let word = &l.input[l.start..l.pos];
+                // identifier 后面必须有合法的字符，.x x 是合法的，但是 .x=3 这样就是违法的
+                // 所以这里必须对identifier后面的字符进行判断
+                if !l.at_terminator(){
+                    l.errorlog = format!("bad character {}", next.unwrap());
+                    l.errorf();
+                    return None;
+                }
+                let key = is_keyword(word).unwrap();
+                if key > ItemType::ItemKeyword{
+                    l.emit(key);
+                }else if word.starts_with("."){
+                    l.emit(ItemType::ItemField);
+                }else if word == "true" || word == "false"{
+                    l.emit(ItemType::ItemBool);
+                }else{
+                    l.emit(ItemType::ItemIdentifier);
+                }
+                break;
+            }
+        }
+        return Some(Box::new(stateInsideAction));
     }
 }
 fn is_keyword(key: &str) -> Option<ItemType>{
@@ -378,6 +462,14 @@ fn is_space(input: char) -> bool{
     return input == ' '|| input == '\t';
 }
 
-fn is_alpha_numeric(r: char) -> bool{
-    return r == '_' || r.is_alphanumeric();
+fn is_alphanumeric(r: Option<char>) -> bool{
+    if r == None{
+        return false;
+    }
+    let c = r.unwrap();
+    return c == '_' || c.is_alphanumeric();
+}
+
+fn is_end_of_line(r: char) -> bool{
+    return r == '\r' || r == '\n';
 }
