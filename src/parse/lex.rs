@@ -1,4 +1,5 @@
 use super::node::*;
+use std::mem;
 use std::ascii::AsciiExt;
 struct Item<'a>{
     typ: ItemType,
@@ -8,7 +9,7 @@ struct Item<'a>{
 
 impl<'a> Item<'a>{
     //函数的参数尽量使&str, 返回值却是要尽量为String，因为调用者需要所有权？
-    fn String(&self) -> String{
+    fn to_string(&self) -> String{
         match self.typ{
             ItemType::ItemEOF => String::from("EOF"),
             ItemType::ItemError => String::from(self.val),
@@ -63,22 +64,42 @@ const RIGHTDELIM: &'static str = "}}";
 const LEFTCOMMENT: &'static str = "/*";
 const RIGHTCOMMENT: &'static str = "*/";
 
-struct lexer<'a>{
+struct Lexer<'a>{
     name: &'a str,
     input: &'a str,
-    leftDelim: &'a str,
-    rightDelim: &'a str,
+    left_delim: &'a str,
+    right_delim: &'a str,
     start: Pos,
     pos: Pos,
     width: Pos,
-    lastPos: Pos,
-    parenDepth: u32,
-    errorlog: String, // 为了使用format！不得已增加这个字段,保证错误信息生命周期与lexer一致
-    items: Vec<Item<'a>>,
+    last_pos: Pos,
+    paren_depth: i32,
+    errorlog: String, // 为了使用format！不得已增加这个字段,保证错误信息生命周期与Lexer一致
+    items: Channel<'a>,
+    state: Box<StateFn>,
 }
 
 
-impl<'a> lexer<'a>{
+struct Channel<'a>{
+    index: usize,
+    items: Vec<Item<'a>>
+}
+impl <'a> Channel<'a>{
+    fn push(&mut self, item: Item<'a>){
+        self.items.push(item);
+    }    
+
+    fn next(&mut self) -> Option<&Item>{
+        if self.items.len() > self.index{
+            let item = self.items.get(self.index);
+            self.index = self.index + 1;
+            return item;
+        }
+        return None;
+    }
+}
+
+impl<'a> Lexer<'a>{
     fn emit(&mut self, t: ItemType){
         let item = Item{typ: t, pos: self.start, val: &self.input[self.start..self.pos]};
         self.items.push(item);
@@ -133,28 +154,119 @@ impl<'a> lexer<'a>{
         match r{
             Some(c) if is_space(c) || is_end_of_line(c)=>return true,
             Some(c) if c == '.' || c==',' || c=='|' || c==':' || c==')' || c=='(' => return true,
-            Some(c) if self.rightDelim.starts_with(c) => return true,
+            Some(c) if self.right_delim.starts_with(c) => return true,
             _ => return false,
         }
+    }
+
+    fn scan_number(&mut self) -> bool{
+        self.accept("+-"); //正负号（也有可能不存在)
+        let mut digits = "0123456789";
+        if self.accept("0") && self.accept("xX"){
+            digits = "0123456789abcdefABCDEF"; // 16 进制
+        }
+        self.accept_run(digits);
+        if self.accept("."){
+            self.accept_run(digits); // 小数点处理
+        }
+        if self.accept("eE"){
+            // 科学计数法处理
+            self.accept("+-");
+            self.accept_run("0123456789");
+        }
+        self.accept("i"); // 复数处理
+        if is_alphanumeric(self.peek()){
+            self.next();
+            return false;
+        }
+        return true;
+    }
+
+    fn accept(&mut self, valid: &'a str) -> bool{
+        // 如果下一个字符符合valid中的一个，就next一下
+        match self.next(){
+            None => return false,
+            Some(r) =>{
+                match valid.find(r){
+                    None => return false,
+                    _ => return true,
+                }
+            }
+        }
+    }
+
+    fn accept_run(&mut self, valid: &'a str){
+        //主要用于匹配数字，符合条件时一直next下去
+        loop{
+            match self.next(){
+                None => break,
+                Some(r) =>{
+                    match valid.find(r){
+                        None =>break,
+                        _ => (),
+                    }
+                }
+            }
+        }
+        self.backup();
+    }
+
+    fn line_number(&mut self) -> usize{
+        let mt:Vec<&str> = self.input[0..self.last_pos].matches("\n").collect();
+        let length: usize = mt.len();
+        return 1 + length;
+    }
+
+    fn next_item(&'a mut self) -> Option<&Item<'a>>{
+        let item = self.items.next();
+        match item{
+            None => None,
+            _ => {
+                self.last_pos = item.unwrap().pos;
+                return item;
+            }
+        }
+    }
+
+    fn drain(&mut self){
+        loop{
+            match self.items.next(){
+                None => break,
+                _ => (),
+            }
+        } 
+    }
+
+    fn run(&mut self){
+        ////mem::replace(&mut self.state, Box::new(StateText));
+        loop{
+            let mut state = StateText;
+           let ret = state.scan(self);
+        //    //let ret = self.state.scan(self);
+        //    match ret{
+        //        None => break,
+        //        Some(r) => (),
+        //    }
+        } 
     }
 }
 
 
-trait stateFn{
-    fn scan<'a>(&self, l: &'a mut lexer<'a>) -> Option<Box<stateFn>>;
+trait StateFn{
+    fn scan<'a>(&self, l: &'a mut Lexer<'a>) -> Option<Box<StateFn>>;
 }
 
-struct stateText;
-impl stateFn for stateText{
-    fn scan(&self, l: &mut lexer) -> Option<Box<stateFn>>{
+struct StateText;
+impl StateFn for StateText{
+    fn scan(&self, l: &mut Lexer) -> Option<Box<StateFn>>{
         let length = l.input.len();
         loop{
-            if l.input[l.pos..length].starts_with(l.leftDelim){
+            if l.input[l.pos..length].starts_with(l.left_delim){
                 if l.pos > l.start{
                     l.emit(ItemType::ItemText);
                 }
                 // lex_left_delim(l);
-                return Some(Box::new(stateLeftDelim));
+                return Some(Box::new(StateLeftDelim));
             }
             match l.next(){
                 None => break,
@@ -169,32 +281,32 @@ impl stateFn for stateText{
     }
 }
 
-struct stateLeftDelim;
-impl stateFn for stateLeftDelim{
-    fn scan(&self, l:&mut lexer)->Option<Box<stateFn>>{
-        l.pos = l.pos + l.leftDelim.len();
+struct StateLeftDelim;
+impl StateFn for StateLeftDelim{
+    fn scan(&self, l:&mut Lexer)->Option<Box<StateFn>>{
+        l.pos = l.pos + l.left_delim.len();
         let length = l.input.len();
         if l.input[l.pos..length].starts_with(LEFTCOMMENT){
-            return Some(Box::new(stateComment));
+            return Some(Box::new(StateComment));
         }
         l.emit(ItemType::ItemLeftDelim);
-        l.parenDepth = 0;
-        return Some(Box::new(stateInsideAction));
+        l.paren_depth = 0;
+        return Some(Box::new(StateInsideAction));
     }
 }
 
-struct stateRightDelim;
-impl stateFn for stateRightDelim{
-    fn scan(&self, l:&mut lexer)->Option<Box<stateFn>>{
-        l.pos = l.pos + l.rightDelim.len();
+struct StateRightDelim;
+impl StateFn for StateRightDelim{
+    fn scan(&self, l:&mut Lexer)->Option<Box<StateFn>>{
+        l.pos = l.pos + l.right_delim.len();
         l.emit(ItemType::ItemRightDelim);
-        return Some(Box::new(stateText));
+        return Some(Box::new(StateText));
     }
 }
 
-struct stateComment;
-impl stateFn for stateComment{
-    fn scan<'a>(&self, l:&'a mut lexer<'a>)->Option<Box<stateFn>>{
+struct StateComment;
+impl StateFn for StateComment{
+    fn scan<'a>(&self, l:&'a mut Lexer<'a>)->Option<Box<StateFn>>{
         // 不知道为什么Go要求模板注释必须紧贴着delim {{/* */ }} 这样多一个空格都是违法的 
         l.pos = l.pos + LEFTCOMMENT.len();
         let length = l.input.len();
@@ -215,15 +327,15 @@ impl stateFn for stateComment{
                 }
                 l.pos = l.pos + RIGHTDELIM.len();
                 l.ignore();
-                return Some(Box::new(stateText));
+                return Some(Box::new(StateText));
             }
         }
     }
 }
 
-struct stateSpace;
-impl stateFn for stateSpace{
-    fn scan(&self, l:&mut lexer)->Option<Box<stateFn>>{
+struct StateSpace;
+impl StateFn for StateSpace{
+    fn scan(&self, l:&mut Lexer)->Option<Box<StateFn>>{
         loop{
             match l.peek(){
                 Some(r) => {
@@ -239,18 +351,18 @@ impl stateFn for stateSpace{
             }
         }
         l.emit(ItemType::ItemSpace);
-        return Some(Box::new(stateInsideAction));
+        return Some(Box::new(StateInsideAction));
     }
 }
 
-struct stateInsideAction;
-impl stateFn for stateInsideAction{
+struct StateInsideAction;
+impl StateFn for StateInsideAction{
     // InsideAction 类似于 {{ $x =1 }} 中间那部分的处理
-    fn scan<'a>(&self, l:&'a mut lexer<'a>)->Option<Box<stateFn>>{
+    fn scan<'a>(&self, l:&'a mut Lexer<'a>)->Option<Box<StateFn>>{
         let length = l.input.len();
-        if l.input[l.pos..length].starts_with(l.rightDelim){
-            if l.parenDepth == 0{
-                return Some(Box::new(stateRightDelim));
+        if l.input[l.pos..length].starts_with(l.right_delim){
+            if l.paren_depth == 0{
+                return Some(Box::new(StateRightDelim));
             }
             // 括号未闭合
             l.errorlog = String::from("unclosed left paren");
@@ -266,7 +378,7 @@ impl stateFn for stateInsideAction{
             return None;
         }
         match next{
-            Some(r) if is_space(r) => return Some(Box::new(stateSpace)),
+            Some(r) if is_space(r) => return Some(Box::new(StateSpace)),
             Some(r) if r == ':' => {
                 if l.next().unwrap() != '='{
                     l.errorlog = String::from("expected :=");
@@ -277,35 +389,35 @@ impl stateFn for stateInsideAction{
                 l.emit(ItemType::ItemColonEquals);
             },
             Some(r) if r == '|' => l.emit(ItemType::ItemPipe),
-            Some(r) if r == '"' => return Some(Box::new(stateQuote)),
-            Some(r) if r == '`' => return Some(Box::new(stateRawQuote)),
-            Some(r) if r == '$' => return Some(Box::new(stateVariable)),
-            Some(r) if r == '\'' => return Some(Box::new(stateChar)),
+            Some(r) if r == '"' => return Some(Box::new(StateQuote)),
+            Some(r) if r == '`' => return Some(Box::new(StateRawQuote)),
+            Some(r) if r == '$' => return Some(Box::new(StateVariable)),
+            Some(r) if r == '\'' => return Some(Box::new(StateChar)),
             Some(r) if r == '.' => {
                 if l.pos < l.input.len(){
                     if r < '0' || '9' < r{
-                        return Some(Box::new(stateField));
+                        return Some(Box::new(StateField));
                     }   
                 }
                 l.backup();
-                return Some(Box::new(stateNumber));
+                return Some(Box::new(StateNumber));
             },
             Some(r) if r == '+' || r =='-' ||('0' <= r && r <= '9')=>{
                 l.backup();
-                return Some(Box::new(stateNumber));
+                return Some(Box::new(StateNumber));
             },
             Some(r) if is_alphanumeric(Some(r)) =>{
                 l.backup();
-                return Some(Box::new(stateIdentifier));
+                return Some(Box::new(StateIdentifier));
             },
             Some(r) if r == '(' => {
                 l.emit(ItemType::ItemLeftParen);
-                l.parenDepth = l.parenDepth + 1;
+                l.paren_depth = l.paren_depth + 1;
             },
             Some(r) if r == ')' => {
                 l.emit(ItemType::ItemRightParen);
-                l.parenDepth = l.parenDepth - 1;
-                if l.parenDepth < 0{
+                l.paren_depth = l.paren_depth - 1;
+                if l.paren_depth < 0{
                     l.errorlog = String::from("unexpected right paren )");
                     l.errorf();
                     // l.errorf("unexpected right paren )");
@@ -315,7 +427,7 @@ impl stateFn for stateInsideAction{
             // \u007F 为最大的ASCII值， 此处还缺少 isPrintable 的判断
             Some(r) if r.is_ascii() =>{
                 l.emit(ItemType::ItemChar);
-                return Some(Box::new(stateInsideAction));
+                return Some(Box::new(StateInsideAction));
             },
             Some(r) => {
                 l.errorlog = format!("unrecognized character in action: {}", r);
@@ -324,48 +436,117 @@ impl stateFn for stateInsideAction{
             }
             _ => return None,
         }
-        Some(Box::new(stateInsideAction))
+        Some(Box::new(StateInsideAction))
     }
 }
 
-struct stateQuote;
-impl stateFn for stateQuote{
-    fn scan(&self, l:&mut lexer) -> Option<Box<stateFn>>{
-        None
+struct StateQuote;
+impl StateFn for StateQuote{
+    fn scan<'a>(&self, l:&'a mut Lexer<'a>) -> Option<Box<StateFn>>{
+        loop{
+            let next = l.next();
+            if next == None{
+                l.errorlog = format!("{}", "unterminated quoted string");
+                l.errorf();
+                return None;
+            }
+            match next.unwrap(){
+                // \"abc  应对这种情况,当成普通字符处理
+                '\\' => {
+                    let r = l.next();
+                    if r != None && r.unwrap() != '\n'{
+                        continue;
+                    }
+                    l.errorlog = format!("{}", "unterminated quoted string");
+                    l.errorf();
+                    return None;
+                },
+                '\n' => {
+                    l.errorlog = format!("{}", "unterminated quoted string");
+                    l.errorf();
+                    return None;
+                }
+                '"' => break,
+                _ => ()
+            }
+
+        }
+        l.emit(ItemType::ItemString);
+        return Some(Box::new(StateInsideAction));
     }
 }
 
-struct stateRawQuote;
-impl stateFn for stateRawQuote{
-    fn scan(&self, l:&mut lexer) -> Option<Box<stateFn>>{
-        None
+struct StateRawQuote;
+impl StateFn for StateRawQuote{
+    fn scan<'a>(&self, l:&'a mut Lexer<'a>) -> Option<Box<StateFn>>{
+        loop{
+            let next = l.next();
+            if next == None{
+                l.errorlog = format!("{}", "unterminated raw quoted string");
+                l.errorf();
+                return None;
+            }
+            if next.unwrap() == '`'{
+                break;
+            }
+        }
+        l.emit(ItemType::ItemRawString);
+        return Some(Box::new(StateInsideAction));
     }
 }
-struct stateVariable;
-impl stateFn for stateVariable{
-    fn scan<'a>(&self, l:&'a mut lexer<'a>) -> Option<Box<stateFn>>{
+
+struct StateVariable;
+impl StateFn for StateVariable{
+    fn scan<'a>(&self, l:&'a mut Lexer<'a>) -> Option<Box<StateFn>>{
         // if l.at_terminator(){
         //     l.emit(ItemType::ItemVariable);
-        //     return Some(Box::new(stateInsideAction));
+        //     return Some(Box::new(StateInsideAction));
         // }
-        return stateFieldOrValiable(l, ItemType::ItemVariable);
+        return state_field_or_variable(l, ItemType::ItemVariable);
     }
 }
-struct stateChar;
-impl stateFn for stateChar{
-    fn scan(&self, l:&mut lexer) -> Option<Box<stateFn>>{
-        None
+struct StateChar;
+impl StateFn for StateChar{
+    fn scan<'a>(&self, l:&'a mut Lexer<'a>) -> Option<Box<StateFn>>{
+        loop{
+            let next = l.next();
+            if next == None{
+                l.errorlog = format!("{}", "unterminated character constant");
+                l.errorf();
+                return None;
+            }
+            match next.unwrap(){
+                '\\' =>{
+                    let r = l.next();
+                    if r != None && r.unwrap() != '\n'{
+                        break;
+                    }
+                    l.errorlog = format!("{}", "unterminated character constant");
+                    l.errorf();
+                    return None;
+                },
+                '\n' =>{
+                    l.errorlog = format!("{}", "unterminated character constant");
+                    l.errorf();
+                    return None;
+                },
+                '\'' =>break,
+                _ => (),
+            }
+        }
+        l.emit(ItemType::ItemCharConstant);
+        return Some(Box::new(StateInsideAction));
     }
 }
-struct stateField;
-impl stateFn for stateField{
+struct StateField;
+impl StateFn for StateField{
     // .x 这样的字段， . 已经扫描了
-    fn scan<'a>(&self, l:&'a mut lexer<'a>) -> Option<Box<stateFn>>{
-        stateFieldOrValiable(l, ItemType::ItemField) 
+    fn scan<'a>(&self, l:&'a mut Lexer<'a>) -> Option<Box<StateFn>>{
+        state_field_or_variable(l, ItemType::ItemField) 
     }
 }
 
-fn stateFieldOrValiable<'a>(l: &'a mut lexer<'a>, typ: ItemType) -> Option<Box<stateFn>>{
+fn state_field_or_variable<'a>(l: &'a mut Lexer<'a>, typ: ItemType) -> Option<Box<StateFn>>{
     if l.at_terminator(){
         // 位于 "." 或者 "$" 之后的是终结符, 比如 .|pipe 这种，算作 ItemDot
         if typ == ItemType::ItemVariable{
@@ -373,7 +554,7 @@ fn stateFieldOrValiable<'a>(l: &'a mut lexer<'a>, typ: ItemType) -> Option<Box<s
         }else{
             l.emit(ItemType::ItemDot);
         }
-        return Some(Box::new(stateInsideAction));
+        return Some(Box::new(StateInsideAction));
     }
     loop{
         let r = l.next();
@@ -388,20 +569,37 @@ fn stateFieldOrValiable<'a>(l: &'a mut lexer<'a>, typ: ItemType) -> Option<Box<s
         }
     }
     l.emit(typ);
-    return Some(Box::new(stateInsideAction));
+    return Some(Box::new(StateInsideAction));
 }
 
-struct stateNumber;
-impl stateFn for stateNumber{
-    fn scan(&self, l:&mut lexer) -> Option<Box<stateFn>>{
-        None
+struct StateNumber;
+impl StateFn for StateNumber{
+    fn scan<'a>(&self, l:&'a mut Lexer<'a>) -> Option<Box<StateFn>>{
+        if !l.scan_number(){
+            l.errorlog = format!("bad number syntax: {}", &l.input[l.start..l.pos]);
+            l.errorf();
+            return None;
+        }
+        let sign = l.peek().unwrap();
+        if sign == '+' || sign == '-'{
+            // 复数，目前貌似不支持加法
+            if !l.scan_number() || l.input[l.pos-1..l.pos].starts_with('i'){
+                l.errorlog = format!("bad number syntax: {}", &l.input[l.start..l.pos]);
+                l.errorf();
+                return None;
+            }
+            l.emit(ItemType::ItemComplex);
+        }else{
+            l.emit(ItemType::ItemNumber);
+        }
+        return Some(Box::new(StateInsideAction));
     }
 }
-struct stateIdentifier;
-impl stateFn for stateIdentifier{
+struct StateIdentifier;
+impl StateFn for StateIdentifier{
     // 主要用于识别几种类型：布尔值，关键字，以 . 开头的字段， 不以 . 开头的字段
     // 两者分别如 .x 以及 x (可能是数字一类的)
-    fn scan<'a>(&self, l:&'a mut lexer<'a>) -> Option<Box<stateFn>>{
+    fn scan<'a>(&self, l:&'a mut Lexer<'a>) -> Option<Box<StateFn>>{
         loop{
             let next = l.next();
             if !is_alphanumeric(next){
@@ -428,7 +626,7 @@ impl stateFn for stateIdentifier{
                 break;
             }
         }
-        return Some(Box::new(stateInsideAction));
+        return Some(Box::new(StateInsideAction));
     }
 }
 fn is_keyword(key: &str) -> Option<ItemType>{
@@ -441,6 +639,7 @@ fn is_keyword(key: &str) -> Option<ItemType>{
         "nil" => Some(ItemType::ItemNil),
         "template" => Some(ItemType::ItemTemplate),
         "with" => Some(ItemType::ItemWith),
+        "end" => Some(ItemType::ItemEnd),
         _ => None,
     }
 }
