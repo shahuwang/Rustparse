@@ -83,7 +83,7 @@ impl Node for ListNode{
     fn position(&self) -> Pos{
         self.pos
     }
-
+    
 }
 impl ListNode{
     fn append(&mut self, node: Box<Node>){
@@ -178,15 +178,29 @@ impl Node for PipeNode{
     fn copy(&self) -> Box<Node>{
         let mut decl:Vec<Box<VariableNode>> = Vec::new();
         for n in &self.decl{
-            let n1 = n.copy() as Box<Any>;
-            let n2 = n1.downcast_ref::<VariableNode>().unwrap();
-            decl.push(Box::new(*n2));
+            let n1 = &n.copy() as &Any;
+            match n1.downcast_ref::<VariableNode>(){
+                Some(n2) =>{
+                    let n3 = n2 as *const VariableNode;
+                    let n4 = n3 as *mut VariableNode;
+                    let n5 = unsafe{Box::from_raw(n4)};
+                    decl.push(n5);
+                },
+                None => ()
+            };
         }
         let mut cmds:Vec<Box<CommandNode>> = Vec::new();
         for n in &self.cmds{
-            let n1 = n.copy() as &Any;
-            let n2 = n1.downcast_ref::<CommandNode>().unwrap();
-            cmds.push(Box::new(*n2));
+            let n1 = &n.copy() as &Any;
+            match n1.downcast_ref::<CommandNode>(){
+                Some(n2) =>{
+                    let n3 = n2 as *const CommandNode;
+                    let n4 = n3 as *mut CommandNode;
+                    let n5 = unsafe{Box::from_raw(n4)};
+                    cmds.push(n5);
+                },
+                None => ()
+            };
         }
         let n = PipeNode{
             tr: self.tr,
