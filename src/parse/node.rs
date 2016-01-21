@@ -46,7 +46,7 @@ impl NodeType{
 pub trait Node{
     fn Type(&self) -> NodeType;
     fn string(&self) -> String;
-    fn copy(&self) -> Box<Node>;
+    fn copy(&self) -> Box<Any>;
     fn position(&self) -> Pos;
     fn tree(&self) -> *const Tree;
 }
@@ -55,7 +55,7 @@ pub struct ListNode{
     pub node_type: NodeType,
     pub pos: Pos,
     pub tr: *const Tree,
-    pub nodes: Vec<Box<Node>>
+    pub nodes: Vec<Box<Any>>
 }
 
 impl Node for ListNode{
@@ -72,7 +72,7 @@ impl Node for ListNode{
         return self.tr
     }
 
-    fn copy(&self) -> Box<Node>{
+    fn copy(&self) -> Box<Any>{
         self.copy_list()
     }
 
@@ -86,7 +86,7 @@ impl Node for ListNode{
     
 }
 impl ListNode{
-    fn append(&mut self, node: Box<Node>){
+    fn append(&mut self, node: Box<Any>){
         self.nodes.push(node);
     }
     fn copy_list(&self) -> Box<ListNode>{
@@ -118,7 +118,7 @@ impl Node for TextNode{
         self.tr
     }
 
-    fn copy(&self) -> Box<Node>{
+    fn copy(&self) -> Box<Any>{
         let t = {
             TextNode{
                 tr: self.tr,
@@ -175,7 +175,7 @@ impl Node for PipeNode{
         self.tr
     }
 
-    fn copy(&self) -> Box<Node>{
+    fn copy(&self) -> Box<Any>{
         let mut decl:Vec<Box<VariableNode>> = Vec::new();
         for n in &self.decl{
             let n1 = &n.copy() as &Any;
@@ -256,7 +256,7 @@ impl Node for VariableNode{
         s
     }
 
-    fn copy(&self) -> Box<Node>{
+    fn copy(&self) -> Box<Any>{
         let mut v: Vec<String> = Vec::new();
         for n in &self.ident{
             v.push(format!("{}", n));
@@ -309,7 +309,7 @@ impl Node for CommandNode{
         self.tr 
     }
 
-    fn copy(&self) -> Box<Node>{
+    fn copy(&self) -> Box<Any>{
         let mut nodes: Vec<Box<Node>> = Vec::new();
         for n in &self.args{
             nodes.push(n.copy());
