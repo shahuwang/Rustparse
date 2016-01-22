@@ -48,13 +48,13 @@ pub trait Node{
     fn string(&self) -> String;
     fn copy(&self) -> Box<Node>;
     fn position(&self) -> Pos;
-    fn tree(&self) -> *const Tree;
+    fn tree(&self) -> CellTree;
 }
 
 pub struct ListNode{
     pub node_type: NodeType,
     pub pos: Pos,
-    pub tr: *const Tree,
+    pub tr: CellTree,
     pub nodes: Vec<Box<Node>>
 }
 
@@ -68,8 +68,8 @@ impl Node for ListNode{
         return s;
     }
 
-    fn tree(&self) -> *const Tree{
-        return self.tr
+    fn tree(&self) -> CellTree{
+        return self.tr.clone();
     }
 
     fn copy(&self) -> Box<Node>{
@@ -86,14 +86,21 @@ impl Node for ListNode{
     
 }
 impl ListNode{
+    fn new(tree: CellTree, pos: Pos) -> Box<ListNode>{
+        let ln = ListNode{
+            node_type: NodeType::NodeList,
+            pos: pos,
+            tr: tree,
+            nodes: vec![]
+        };
+        return Box::new(ln);
+    }
+
     fn append(&mut self, node: Box<Node>){
         self.nodes.push(node);
     }
     fn copy_list(&self) -> Box<ListNode>{
-        let mut ln:Box<ListNode> = unsafe{
-            let tree = &*self.tr;
-            tree.new_list(self.pos)
-        };
+        let mut ln:Box<ListNode> = ListNode::new(self.tr.clone(), self.pos);
         for n in &self.nodes{
             let n1 = n.copy();
             ln.append(n1);
@@ -105,7 +112,7 @@ impl ListNode{
 pub struct TextNode{
     pub node_type: NodeType,
     pub pos: Pos,
-    pub tr: *const Tree,
+    pub tr: CellTree,
     pub text: String
 }
 
@@ -114,14 +121,14 @@ impl Node for TextNode{
         format!("{}", self.text)
     }
 
-    fn tree(&self) -> *const Tree{
-        self.tr
+    fn tree(&self) -> CellTree{
+        self.tr.clone()
     }
 
     fn copy(&self) -> Box<Node>{
         let t = {
             TextNode{
-                tr: self.tr,
+                tr: self.tr.clone(),
                 node_type: NodeType::NodeText,
                 pos: self.pos,
                 text: format!("{}", self.text)
@@ -142,7 +149,7 @@ impl Node for TextNode{
 pub struct PipeNode{
     pub node_type: NodeType,
     pub pos: Pos,
-    pub tr: *const Tree,
+    pub tr: CellTree,
     pub line: i32,
     pub decl: Vec<Box<Node>>, // all is VariableNode
     pub cmds: Vec<Box<Node>>  // all is CommandNode
@@ -171,8 +178,8 @@ impl Node for PipeNode{
         s
     }
     
-    fn tree(&self) -> *const Tree{
-        self.tr
+    fn tree(&self) -> CellTree{
+        self.tr.clone()
     }
 
     fn copy(&self) -> Box<Node>{
@@ -185,7 +192,7 @@ impl Node for PipeNode{
             cmds.push(n.copy());
         }
         let n = PipeNode{
-            tr: self.tr,
+            tr: self.tr.clone(),
             pos: self.pos,
             node_type: self.node_type,
             line: self.line,
@@ -207,13 +214,13 @@ impl Node for PipeNode{
 pub struct VariableNode{
     pub node_type: NodeType,
     pub pos: Pos,
-    pub tr: *const Tree,
+    pub tr: CellTree,
     pub ident: Vec<String>
 }
 
 impl Node for VariableNode{
-    fn tree(&self) -> *const Tree{
-        self.tr
+    fn tree(&self) -> CellTree{
+        self.tr.clone()
     }
 
     fn Type(&self) -> NodeType{
@@ -244,7 +251,7 @@ impl Node for VariableNode{
             v.push(format!("{}", n));
         }
         let n = VariableNode{
-            tr: self.tr,
+            tr: self.tr.clone(),
             node_type: self.node_type,
             pos: self.pos,
             ident: v
@@ -256,7 +263,7 @@ impl Node for VariableNode{
 pub struct CommandNode{
     pub node_type: NodeType,
     pub pos: Pos,
-    pub tr: *const Tree,
+    pub tr: CellTree,
     pub args: Vec<Box<Node>>
 }
 
@@ -287,8 +294,8 @@ impl Node for CommandNode{
         s
     }
 
-    fn tree(&self) -> *const Tree{
-        self.tr 
+    fn tree(&self) -> CellTree{
+        self.tr.clone()
     }
 
     fn copy(&self) -> Box<Node>{
@@ -299,7 +306,7 @@ impl Node for CommandNode{
         let cnd = CommandNode{
             node_type: self.node_type,
             pos: self.pos,
-            tr: self.tr,
+            tr: self.tr.clone(),
             args: nodes 
         };
         Box::new(cnd)
