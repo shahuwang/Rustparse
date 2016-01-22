@@ -20,26 +20,26 @@ impl Tree{
         return Box::new(ln);
     }
 
-    pub fn new_text(&self, pos: Pos, text: &str) -> Box<TextNode>{
-        let tn = TextNode{
-            node_type: NodeType::NodeText,
-            pos: pos,
-            tr: self as *const Tree,
-            text: String::from(text)
-        };
-        Box::new(tn)
-    }
+    // pub fn new_text(&self, pos: Pos, text: &str) -> Box<TextNode>{
+    //     let tn = TextNode{
+    //         node_type: NodeType::NodeText,
+    //         pos: pos,
+    //         tr: self as *const Tree,
+    //         text: String::from(text)
+    //     };
+    //     Box::new(tn)
+    // }
 
-    pub fn new_pipeline(&self, pos: Pos, line: i32,
-                        decl: Vec<Box<VariableNode>>)->Box<PipeNode>{
-        let pn = PipeNode{
-            node_type: NodeType::NodePipe,
-            pos: pos,
-            tr: self as *const Tree,
-            line: line,
-            decl: decl,
-            cmds: vec![]
-        };
-        Box::new(pn)
-    }
+    // pub fn new_pipeline(&self, pos: Pos, line: i32,
+    //                     decl: Vec<Box<VariableNode>>)->Box<PipeNode>{
+    //     let pn = PipeNode{
+    //         node_type: NodeType::NodePipe,
+    //         pos: pos,
+    //         tr: self as *const Tree,
+    //         line: line,
+    //         decl: decl,
+    //         cmds: vec![]
+    //     };
+    //     Box::new(pn)
+    // }
 }

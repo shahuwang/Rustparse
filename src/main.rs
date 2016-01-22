@@ -1,14 +1,15 @@
 // This code is editable and runnable!
 #[macro_use]
 extern crate lazy_static;
-// mod parse;
-// use parse::lex::*;
-// use parse::parse::*;
+mod parse;
+use parse::lex::*;
+use parse::parse::*;
 use std::any::Any;
 trait Node{
     fn string(&self) -> String;
     fn copy(&self) -> Box<Any>;
 }
+#[derive(Debug)]
 struct TextNode{
     val: String,
     names: Vec<String>
@@ -25,6 +26,7 @@ impl Node for TextNode{
     }
 }
 
+#[derive(Debug)]
 struct ActionNode{
     val: String,
     txt: Vec<Box<TextNode>>
@@ -51,6 +53,7 @@ impl Node for ActionNode{
     }
 }
 
+#[derive(Debug)]
 struct ListNode{
     val: String,
     nodes: Vec<Box<Any>>  // contains ActionNode and TextNode
@@ -62,10 +65,18 @@ impl Node for ListNode{
     }
 
     fn copy(&self) -> Box<Any> {
-        let nodes:Vec<Box<Any>> = Vec::new();
+        let mut nodes:Vec<Box<Any>> = Vec::new();
         // 需要逐个downcast尝试各种类型
         for n in &self.nodes{
-            nodes.push(*n.clone());
+            match n.downcast_ref::<TextNode>(){
+                Some(n1) => nodes.push(n1.copy()),
+                None => {
+                    match n.downcast_ref::<ActionNode>(){
+                        Some(n2) => nodes.push(n2.copy()),
+                        None => println!("nil downcast_ref"),
+                    }
+                }
+            };
         }
         let ln = ListNode{
             val: self.string(),
@@ -75,5 +86,20 @@ impl Node for ListNode{
     }
 }
 fn main() {
+    let tnode = TextNode{
+        val: String::from("textnode"),
+        names: vec![String::from("name1")]
+    };
+    let action = ActionNode{
+        val: String::from("actionnode"),
+        txt: vec![]
+    };
+    let ln = ListNode{
+        val: String::from("ListNode"),
+        nodes: vec![Box::new(tnode), Box::new(action)]
+    };
+    if let Ok(ln2) = ln.copy().downcast::<ListNode>(){
+        println!("{:?}", ln2);
+    }
 }
 
