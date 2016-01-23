@@ -1,6 +1,7 @@
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::any::Any;
+use std::mem;
 use super::parse::*;
 pub type Pos = usize;
 
@@ -116,6 +117,18 @@ pub struct TextNode{
     pub text: String
 }
 
+impl TextNode{
+    fn new(tree: CellTree,  pos: Pos, text: &str) -> Box<TextNode>{
+        let tn = TextNode{
+            node_type: NodeType::NodeText,
+            pos: pos,
+            tr: tree,
+            text: String::from(text)
+        };
+        Box::new(tn)
+    }
+}
+
 impl Node for TextNode{
     fn string(&self) -> String{
         format!("{}", self.text)
@@ -155,6 +168,40 @@ pub struct PipeNode{
     pub cmds: Vec<Box<Node>>  // all is CommandNode
 }
 
+impl PipeNode{
+    fn new(tree: CellTree, pos: Pos, line: i32, decl: Vec<Box<Node>>) -> Box<PipeNode>{
+        let pn = PipeNode{
+            node_type: NodeType::NodePipe,
+            pos: pos,
+            tr: tree,
+            line: line,
+            decl: decl,
+            cmds: vec![]
+        };
+        Box::new(pn)
+    }
+
+    fn copy_pipe(&self) -> Box<PipeNode>{
+        let mut decl:Vec<Box<Node>> = Vec::new();
+        for n in &self.decl{
+            decl.push(n.copy());
+        }
+        let mut cmds:Vec<Box<Node>> = Vec::new();
+        for n in &self.cmds{
+            cmds.push(n.copy());
+        }
+        let n = PipeNode{
+            tr: self.tr.clone(),
+            pos: self.pos,
+            node_type: self.node_type,
+            line: self.line,
+            decl: decl,
+            cmds: cmds
+        };
+        Box::new(n)
+    }
+}
+
 impl Node for PipeNode{
     fn string(&self) -> String{
         let mut s = String::new();
@@ -183,23 +230,7 @@ impl Node for PipeNode{
     }
 
     fn copy(&self) -> Box<Node>{
-        let mut decl:Vec<Box<Node>> = Vec::new();
-        for n in &self.decl{
-            decl.push(n.copy());
-        }
-        let mut cmds:Vec<Box<Node>> = Vec::new();
-        for n in &self.cmds{
-            cmds.push(n.copy());
-        }
-        let n = PipeNode{
-            tr: self.tr.clone(),
-            pos: self.pos,
-            node_type: self.node_type,
-            line: self.line,
-            decl: decl,
-            cmds: cmds
-        };
-        Box::new(n)
+        self.copy_pipe()
     }
 
     fn Type(&self) -> NodeType{
@@ -216,6 +247,18 @@ pub struct VariableNode{
     pub pos: Pos,
     pub tr: CellTree,
     pub ident: Vec<String>
+}
+
+impl VariableNode{
+    fn new(tree: CellTree, pos: Pos, ident: &str) -> Box<VariableNode>{
+        let vn = VariableNode{
+            node_type: NodeType::NodeVariable,
+            pos: pos,
+            tr: tree,
+            ident: ident.split(".").map(|s: &str|->String{String::from(s)}).collect()
+        };
+        Box::new(vn)
+    }
 }
 
 impl Node for VariableNode{
@@ -267,6 +310,17 @@ pub struct CommandNode{
     pub args: Vec<Box<Node>>
 }
 
+impl CommandNode{
+    fn new(tree: CellTree, pos: Pos) -> Box<CommandNode>{
+        let cn = CommandNode{
+            node_type: NodeType::NodeCommand,
+            pos: pos,
+            tr: tree,
+            args: vec![]
+        };
+        Box::new(cn)
+    }
+}
 impl Node for CommandNode{
     fn string(&self) -> String{
         let mut s = String::new();
@@ -319,4 +373,56 @@ impl Node for CommandNode{
     fn position(&self) -> Pos{
         self.pos
     }
+}
+
+struct ActionNode{
+    node_type: NodeType,
+    pos: Pos,
+    tr: CellTree,
+    line: i32,
+    pipe: Box<PipeNode>
+}
+
+impl ActionNode{
+    fn new(tree: CellTree, pos: Pos, line: i32, pipe: Box<PipeNode>) -> Box<ActionNode>{
+        let ac = ActionNode{
+            tr: tree,
+            pos: pos,
+            line: line,
+            node_type: NodeType::NodeAction,
+            pipe: pipe
+        };
+        Box::new(ac)
+    }
+}
+
+impl  Node for ActionNode{
+    fn string(&self) -> String{
+        format!("{{{{ {} }}}}", self.pipe.string())
+    }
+
+    fn copy(&self) -> Box<Node>{
+        // let ac = ActionNode{
+        //     tr: self.tr.clone(),
+        //     pos: self.pos,
+        //     line: self.line,
+        //     node_type: NodeType::NodeAction,
+        //     pipe: &self.pipe.copy_pipe()
+        // };
+        // Box::new(ac)
+        ActionNode::new(self.tr.clone(), self.pos, self.line, self.pipe.copy_pipe())
+    }
+
+    fn tree(&self) -> CellTree{
+        return self.tr.clone();
+    }
+
+    fn Type(&self) -> NodeType{
+        self.node_type
+    }
+
+    fn position(&self) -> Pos{
+        self.pos
+    }
+    
 }
