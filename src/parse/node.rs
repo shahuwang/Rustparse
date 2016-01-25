@@ -14,7 +14,7 @@ impl posTrait for Pos{
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum NodeType{
     NodeText,
     NodeAction,
@@ -52,6 +52,8 @@ pub trait Node{
     fn tree(&self) -> CellTree;
 }
 
+
+// #[derive(Debug)]
 pub struct ListNode{
     pub node_type: NodeType,
     pub pos: Pos,
@@ -110,6 +112,7 @@ impl ListNode{
     }
 }
 
+// #[derive(Debug)]
 pub struct TextNode{
     pub node_type: NodeType,
     pub pos: Pos,
@@ -159,17 +162,18 @@ impl Node for TextNode{
     }
 }
 
+// #[derive(Debug)]
 pub struct PipeNode{
     pub node_type: NodeType,
     pub pos: Pos,
     pub tr: CellTree,
     pub line: i32,
-    pub decl: Vec<Box<Node>>, // all is VariableNode
-    pub cmds: Vec<Box<Node>>  // all is CommandNode
+    pub decl: Vec<Box<VariableNode>>, // all is VariableNode
+    pub cmds: Vec<Box<CommandNode>>  // all is CommandNode
 }
 
 impl PipeNode{
-    fn new(tree: CellTree, pos: Pos, line: i32, decl: Vec<Box<Node>>) -> Box<PipeNode>{
+    fn new(tree: CellTree, pos: Pos, line: i32, decl: Vec<Box<VariableNode>>) -> Box<PipeNode>{
         let pn = PipeNode{
             node_type: NodeType::NodePipe,
             pos: pos,
@@ -182,13 +186,23 @@ impl PipeNode{
     }
 
     fn copy_pipe(&self) -> Box<PipeNode>{
-        let mut decl:Vec<Box<Node>> = Vec::new();
+        let mut decl:Vec<Box<VariableNode>> = Vec::new();
         for n in &self.decl{
-            decl.push(n.copy());
+            let n1: Box<Any> = unsafe{mem::transmute(n.copy())};
+            if let Ok(n2) = n1.downcast::<VariableNode>(){
+                decl.push(n2);
+            }else{
+                // panic!("Error type of : {:?}", n);
+            }
         }
-        let mut cmds:Vec<Box<Node>> = Vec::new();
+        let mut cmds:Vec<Box<CommandNode>> = Vec::new();
         for n in &self.cmds{
-            cmds.push(n.copy());
+            let n1: Box<Any> = unsafe{mem::transmute(n.copy())};
+            if let Ok(n2) = n1.downcast::<CommandNode>(){
+                cmds.push(n2);
+            }else{
+                // panic!("Error type of : {:?}", n);
+            }
         }
         let n = PipeNode{
             tr: self.tr.clone(),
@@ -242,6 +256,7 @@ impl Node for PipeNode{
     }
 }
 
+// #[derive(Debug)]
 pub struct VariableNode{
     pub node_type: NodeType,
     pub pos: Pos,
@@ -303,6 +318,7 @@ impl Node for VariableNode{
     }
 }
 
+// #[derive(Debug)]
 pub struct CommandNode{
     pub node_type: NodeType,
     pub pos: Pos,
@@ -375,6 +391,7 @@ impl Node for CommandNode{
     }
 }
 
+// #[derive(Debug)]
 struct ActionNode{
     node_type: NodeType,
     pos: Pos,

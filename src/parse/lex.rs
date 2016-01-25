@@ -65,6 +65,7 @@ const RIGHTDELIM: &'static str = "}}";
 const LEFTCOMMENT: &'static str = "/*";
 const RIGHTCOMMENT: &'static str = "*/";
 
+#[derive(Debug)]
 pub struct Lexer{
     pub name: &'static str,
     pub input: &'static str,
@@ -79,6 +80,7 @@ pub struct Lexer{
 }
 
 
+#[derive(Debug)]
 pub struct Channel{
     pub index: usize,
     pub items: Vec<Rc<Item>>

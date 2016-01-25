@@ -5,6 +5,7 @@ mod parse;
 use parse::lex::*;
 use parse::parse::*;
 use std::any::Any;
+use std::mem;
 trait Node{
     fn string(&self) -> String;
     fn copy(&self) -> Box<Any>;
@@ -94,12 +95,14 @@ fn main() {
         val: String::from("actionnode"),
         txt: vec![]
     };
+    let ac = action.copy();
     let ln = ListNode{
         val: String::from("ListNode"),
         nodes: vec![Box::new(tnode), Box::new(action)]
     };
-    if let Ok(ln2) = ln.copy().downcast::<ListNode>(){
-        println!("{:?}", ln2);
+    let ay: Box<Any> = unsafe{mem::transmute(ac)};
+    if let Ok(ao) = ay.downcast::<ActionNode>(){
+        println!("{:?}", ao);
     }
 }
 
