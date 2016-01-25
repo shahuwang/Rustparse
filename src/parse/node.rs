@@ -192,7 +192,7 @@ impl PipeNode{
             if let Ok(n2) = n1.downcast::<VariableNode>(){
                 decl.push(n2);
             }else{
-                // panic!("Error type of : {:?}", n);
+                panic!("Error type , must be VariableNode");
             }
         }
         let mut cmds:Vec<Box<CommandNode>> = Vec::new();
@@ -201,7 +201,7 @@ impl PipeNode{
             if let Ok(n2) = n1.downcast::<CommandNode>(){
                 cmds.push(n2);
             }else{
-                // panic!("Error type of : {:?}", n);
+                panic!("Error type, must be CommandNode");
             }
         }
         let n = PipeNode{
