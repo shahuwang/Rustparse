@@ -9,14 +9,27 @@ pub struct Tree{
     pub parse_name: String,
     pub root: Box<ListNode>,
     text: String,
-    lex: Box<Lexer>,
-    token: [Item; 3],
+    lex: Option<Box<Lexer>>,
+    token: [Option<Item>; 3],
     peek_count: i8,
     vars: Vec<String>
 }
 
-// impl Tree{
-// }
+impl Tree{
+    pub fn copy(&self) ->Box<Tree>{
+        let tree = Tree{
+            name: format!("{}", self.name),
+            parse_name: format!("{}", self.name),
+            root: self.root.copy(),
+            text: format!("{}", self.text),
+            lex: None,
+            token: [None, None, None],
+            peek_count: 0,
+            vars: vec![]
+        };
+        Box::new(tree)
+    }
+}
 
 pub type CellTree = Rc<RefCell<Box<Tree>>>;
 
